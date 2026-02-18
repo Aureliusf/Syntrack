@@ -1,0 +1,18 @@
+<div class="burn-rate-info">
+    {{if .HasData}}
+    <div class="stat-row">
+        <span class="label">Rate:</span>
+        <span class="value">{{printf "%.2f" .Rate}} requests/hour</span>
+    </div>
+    <div class="stat-row">
+        <span class="label">Time left:</span>
+        <span class="value">{{printf "%.1f" .HoursLeft}} hours ({{printf "%.1f" .DaysLeft}} days)</span>
+    </div>
+    <div class="stat-row">
+        <span class="label">Current leftover:</span>
+        <span class="value">{{.Leftover}}</span>
+    </div>
+    {{else}}
+    <p class="muted">Not enough data to calculate burn rate. Collect more snapshots over time.</p>
+    {{end}}
+</div>

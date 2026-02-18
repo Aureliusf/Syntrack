@@ -1,0 +1,22 @@
+<table>
+    <thead>
+        <tr>
+            <th>Day</th>
+            <th>Consumed</th>
+            <th>Min Left</th>
+            <th>Max Left</th>
+            <th>Avg Left</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .}}
+        <tr>
+            <td>{{.Day}}</td>
+            <td>{{.RequestsConsumed}}</td>
+            <td>{{printf "%.0f" .MinLeftover}}</td>
+            <td>{{printf "%.0f" .MaxLeftover}}</td>
+            <td>{{printf "%.0f" .AvgLeftover}}</td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>

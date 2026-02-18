@@ -1,0 +1,9 @@
+{{range .Snapshots}}
+<tr>
+    <td>{{.CollectedAt.Format "2006-01-02 15:04"}}</td>
+    <td>{{.SubscriptionLimit}}</td>
+    <td>{{.RequestsUsed}}</td>
+    <td>{{.Leftover}}</td>
+    <td>{{if .RenewsAt}}{{.RenewsAt.Format "2006-01-02 15:04"}}{{else}}-{{end}}</td>
+</tr>
+{{end}}

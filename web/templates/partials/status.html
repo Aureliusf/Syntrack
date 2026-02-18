@@ -1,0 +1,16 @@
+<div class="stat-card">
+    <span class="label">Limit</span>
+    <span class="value">{{.Limit}}</span>
+</div>
+<div class="stat-card">
+    <span class="label">Used</span>
+    <span class="value used">{{.Used}}</span>
+</div>
+<div class="stat-card">
+    <span class="label">Leftover</span>
+    <span class="value leftover">{{.Leftover}}</span>
+</div>
+<div class="stat-card">
+    <span class="label">Usage</span>
+    <span class="value">{{printf "%.1f" .Percent}}%</span>
+</div>

@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="history">
+    <h2>Usage History</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Limit</th>
+                <th>Used</th>
+                <th>Leftover</th>
+                <th>Renews At</th>
+            </tr>
+        </thead>
+        <tbody hx-get="/partials/history-table" hx-trigger="load">
+            Loading...
+        </tbody>
+    </table>
+</div>
+{{end}}

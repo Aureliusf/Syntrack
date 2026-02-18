@@ -1,0 +1,18 @@
+<div class="overall-stats">
+    <div class="stat-row">
+        <span class="label">Total snapshots:</span>
+        <span class="value">{{.TotalSnapshots}}</span>
+    </div>
+    <div class="stat-row">
+        <span class="label">First snapshot:</span>
+        <span class="value">{{.FirstSnapshot}}</span>
+    </div>
+    <div class="stat-row">
+        <span class="label">Latest snapshot:</span>
+        <span class="value">{{.LatestSnapshot}}</span>
+    </div>
+    <div class="stat-row">
+        <span class="label">Avg daily usage:</span>
+        <span class="value">{{printf "%.1f" .AvgDaily}} requests</span>
+    </div>
+</div>

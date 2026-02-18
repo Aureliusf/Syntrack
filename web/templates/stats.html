@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="stats-page">
+    <section>
+        <h2>Daily Usage</h2>
+        <div hx-get="/partials/daily-stats" hx-trigger="load">
+            Loading...
+        </div>
+    </section>
+    
+    <section>
+        <h2>Weekly Usage</h2>
+        <div hx-get="/partials/weekly-stats" hx-trigger="load">
+            Loading...
+        </div>
+    </section>
+    
+    <section>
+        <h2>Overall Statistics</h2>
+        <div hx-get="/partials/overall-stats" hx-trigger="load">
+            Loading...
+        </div>
+    </section>
+</div>
+{{end}}

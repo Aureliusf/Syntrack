@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="dashboard">
+    <section class="current-status">
+        <h2>Current Status</h2>
+        <div class="stats-grid" hx-get="/partials/status" hx-trigger="load, every 5m">
+            Loading...
+        </div>
+    </section>
+    
+    <section class="chart-section">
+        <h2>Usage Over Time</h2>
+        <div hx-get="/partials/chart" hx-trigger="load">
+            Loading chart...
+        </div>
+    </section>
+    
+    <section class="burn-rate">
+        <h2>Burn Rate</h2>
+        <div hx-get="/partials/burn-rate" hx-trigger="load">
+            Loading...
+        </div>
+    </section>
+</div>
+{{end}}
