@@ -49,15 +49,67 @@ func detectTailscaleIP() string {
 	return ""
 }
 
+func tokenAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth if not required or no tokens configured
+		if !requireAuth || len(authTokens) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow localhost requests without token
+		host := r.Host
+		if strings.HasPrefix(host, "localhost:") || strings.HasPrefix(host, "127.0.0.1:") || strings.HasPrefix(host, "[::1]:") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check X-Auth-Token header
+		token := r.Header.Get("X-Auth-Token")
+		if token == "" {
+			http.Error(w, "Unauthorized: X-Auth-Token header required", http.StatusUnauthorized)
+			return
+		}
+
+		// Validate token
+		valid := false
+		for _, t := range authTokens {
+			if t == token {
+				valid = true
+				break
+			}
+		}
+
+		if !valid {
+			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the web dashboard server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Load config to get auth tokens
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		// Load auth tokens if auth is required
+		if requireAuth || bindAll || useTailscale {
+			authTokens = cfg.AuthTokens
+			if len(authTokens) == 0 {
+				return fmt.Errorf("external access requires authentication; set SYNTRACK_AUTH_TOKENS or use 'syntrack token generate --save'")
+			}
+			requireAuth = true // Force auth when binding externally
+		}
+
 		var bindHost string
 		if bindAll {
-			if len(authTokens) == 0 && !requireAuth {
-				return fmt.Errorf("--auth-token is required when using --bind-all")
-			}
 			bindHost = "0.0.0.0"
 		} else if useTailscale {
 			bindHost = tailscaleIP
@@ -143,14 +195,22 @@ var serveCmd = &cobra.Command{
 		mux.HandleFunc("/partials/weekly-stats", makePartialHandler(database, partials, "weekly-stats.html", getWeeklyData))
 		mux.HandleFunc("/partials/overall-stats", makePartialHandler(database, partials, "overall-stats.html", getOverallData))
 
+		// Apply token auth middleware
+		handler := tokenAuth(mux)
+
 		addr := fmt.Sprintf("%s:%d", bindHost, servePort)
 		fmt.Printf("Starting server at http://%s\n", addr)
-		return http.ListenAndServe(addr, mux)
+		if requireAuth {
+			fmt.Printf("Authentication enabled with %d token(s)\n", len(authTokens))
+			fmt.Println("External requests require X-Auth-Token header")
+		}
+		return http.ListenAndServe(addr, handler)
 	},
 }
 
 func init() {
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", 8080, "Port to listen on")
+	serveCmd.Flags().BoolVar(&requireAuth, "auth", false, "Require token authentication (reads from SYNTRACK_AUTH_TOKENS env or ~/.syntrack/tokens)")
 	serveCmd.Flags().BoolVar(&bindAll, "bind-all", false, "Bind to all interfaces (0.0.0.0) - requires auth token")
 	serveCmd.Flags().BoolVar(&useTailscale, "tailscale", false, "Bind to Tailscale interface")
 	serveCmd.Flags().StringVar(&tailscaleIP, "tailscale-ip", "", "Tailscale IP address (auto-detected if not specified)")
