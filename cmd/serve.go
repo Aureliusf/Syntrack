@@ -7,11 +7,54 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aure/syntrack/internal/config"
 	"github.com/aure/syntrack/internal/db"
 	"github.com/spf13/cobra"
 )
 
 var servePort int
+var requireAuth bool
+var authTokens []string
+
+func tokenAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth if not required or no tokens configured
+		if !requireAuth || len(authTokens) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow localhost requests without token
+		host := r.Host
+		if strings.HasPrefix(host, "localhost:") || strings.HasPrefix(host, "127.0.0.1:") || strings.HasPrefix(host, "[::1]:") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check X-Auth-Token header
+		token := r.Header.Get("X-Auth-Token")
+		if token == "" {
+			http.Error(w, "Unauthorized: X-Auth-Token header required", http.StatusUnauthorized)
+			return
+		}
+
+		// Validate token
+		valid := false
+		for _, t := range authTokens {
+			if t == token {
+				valid = true
+				break
+			}
+		}
+
+		if !valid {
+			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -130,24 +173,44 @@ func getStatusData(database *db.DB) (any, error) {
 	}, nil
 }
 
+type ChartPoint struct {
+	X float64
+	Y float64
+}
+
+type ChartLabel struct {
+	X          float64
+	Y          float64
+	Text       string
+	FontSize   int
+	TextAnchor string
+}
+
 type ChartData struct {
-	SVGContent template.HTML
+	Width       float64
+	Height      float64
+	Padding     float64
+	ChartWidth  float64
+	ChartHeight float64
+	PointsUsed  []ChartPoint
+	PointsLeft  []ChartPoint
+	Labels      []ChartLabel
+	NoData      bool
 }
 
 func getChartData(database *db.DB) (any, error) {
 	since := time.Now().AddDate(0, 0, -7)
 	snapshots, err := database.GetSnapshots(since)
 	if err != nil || len(snapshots) == 0 {
-		return ChartData{SVGContent: template.HTML("<text x='400' y='200' text-anchor='middle' fill='#71767b'>No data available</text>")}, nil
+		return ChartData{NoData: true, Width: 800, Height: 400}, nil
 	}
 
-	svg := generateSVGChart(snapshots)
-	return ChartData{SVGContent: template.HTML(svg)}, nil
+	return generateSVGChart(snapshots), nil
 }
 
-func generateSVGChart(snapshots []db.UsageSnapshot) string {
+func generateSVGChart(snapshots []db.UsageSnapshot) ChartData {
 	if len(snapshots) < 2 {
-		return "<text x='400' y='200' text-anchor='middle' fill='#71767b'>Need more data points</text>"
+		return ChartData{NoData: true, Width: 800, Height: 400}
 	}
 
 	width := 800.0
@@ -163,46 +226,52 @@ func generateSVGChart(snapshots []db.UsageSnapshot) string {
 		}
 	}
 
-	pointsUsed := make([]string, len(snapshots))
-	pointsLeft := make([]string, len(snapshots))
+	pointsUsed := make([]ChartPoint, len(snapshots))
+	pointsLeft := make([]ChartPoint, len(snapshots))
 
 	for i, s := range snapshots {
 		x := padding + (float64(i)/float64(len(snapshots)-1))*chartWidth
 		yUsed := padding + chartHeight - (float64(s.RequestsUsed)/maxVal)*chartHeight
 		yLeft := padding + chartHeight - (float64(s.Leftover)/maxVal)*chartHeight
 
-		pointsUsed[i] = fmt.Sprintf("%.1f,%.1f", x, yUsed)
-		pointsLeft[i] = fmt.Sprintf("%.1f,%.1f", x, yLeft)
+		pointsUsed[i] = ChartPoint{X: x, Y: yUsed}
+		pointsLeft[i] = ChartPoint{X: x, Y: yLeft}
 	}
-
-	var svg strings.Builder
-	svg.WriteString(fmt.Sprintf(`<svg viewBox="0 0 %.0f %.0f" xmlns="http://www.w3.org/2000/svg">`, width, height))
-
-	svg.WriteString(`<rect width="100%" height="100%" fill="#0f1419"/>`)
-
-	svg.WriteString(fmt.Sprintf(`<line x1="%.0f" y1="%.0f" x2="%.0f" y2="%.0f" stroke="#2f3336" stroke-width="1"/>`, padding, padding, padding, height-padding))
-	svg.WriteString(fmt.Sprintf(`<line x1="%.0f" y1="%.0f" x2="%.0f" y2="%.0f" stroke="#2f3336" stroke-width="1"/>`, padding, height-padding, width-padding, height-padding))
-
-	svg.WriteString(fmt.Sprintf(`<text x="%.0f" y="%.0f" fill="#71767b" font-size="12">Used</text>`, padding, padding-20))
-	svg.WriteString(fmt.Sprintf(`<text x="%.0f" y="%.0f" fill="#71767b" font-size="12">Leftover</text>`, padding+80, padding-20))
-
-	svg.WriteString(fmt.Sprintf(`<polyline points="%s" fill="none" stroke="#f4212e" stroke-width="2"/>`, strings.Join(pointsUsed, " ")))
-	svg.WriteString(fmt.Sprintf(`<polyline points="%s" fill="none" stroke="#00ba7c" stroke-width="2"/>`, strings.Join(pointsLeft, " ")))
 
 	step := len(snapshots) / 5
 	if step < 1 {
 		step = 1
 	}
+
+	labels := []ChartLabel{
+		{X: padding, Y: padding - 20, Text: "Used", FontSize: 12, TextAnchor: "start"},
+		{X: padding + 80, Y: padding - 20, Text: "Leftover", FontSize: 12, TextAnchor: "start"},
+	}
+
 	for i, s := range snapshots {
 		if i%step == 0 || i == len(snapshots)-1 {
 			x := padding + (float64(i)/float64(len(snapshots)-1))*chartWidth
-			label := s.CollectedAt.Format("01/02")
-			svg.WriteString(fmt.Sprintf(`<text x="%.0f" y="%.0f" fill="#71767b" font-size="10" text-anchor="middle">%s</text>`, x, height-padding+20, label))
+			labels = append(labels, ChartLabel{
+				X:          x,
+				Y:          height - padding + 20,
+				Text:       s.CollectedAt.Format("01/02"),
+				FontSize:   10,
+				TextAnchor: "middle",
+			})
 		}
 	}
 
-	svg.WriteString(`</svg>`)
-	return svg.String()
+	return ChartData{
+		Width:       width,
+		Height:      height,
+		Padding:     padding,
+		ChartWidth:  chartWidth,
+		ChartHeight: chartHeight,
+		PointsUsed:  pointsUsed,
+		PointsLeft:  pointsLeft,
+		Labels:      labels,
+		NoData:      false,
+	}
 }
 
 type BurnRateData struct {
