@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"html/template"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,51 +16,65 @@ import (
 var servePort int
 var requireAuth bool
 var authTokens []string
+var bindAll bool
+var useTailscale bool
+var tailscaleIP string
 
-func tokenAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth if not required or no tokens configured
-		if !requireAuth || len(authTokens) == 0 {
-			next.ServeHTTP(w, r)
-			return
+func detectTailscaleIP() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	for _, iface := range interfaces {
+		if !strings.Contains(strings.ToLower(iface.Name), "tailscale") {
+			continue
 		}
 
-		// Allow localhost requests without token
-		host := r.Host
-		if strings.HasPrefix(host, "localhost:") || strings.HasPrefix(host, "127.0.0.1:") || strings.HasPrefix(host, "[::1]:") {
-			next.ServeHTTP(w, r)
-			return
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
 		}
 
-		// Check X-Auth-Token header
-		token := r.Header.Get("X-Auth-Token")
-		if token == "" {
-			http.Error(w, "Unauthorized: X-Auth-Token header required", http.StatusUnauthorized)
-			return
-		}
-
-		// Validate token
-		valid := false
-		for _, t := range authTokens {
-			if t == token {
-				valid = true
-				break
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				ip := ipnet.IP
+				if ip.To4() != nil && !ip.IsLoopback() {
+					return ip.String()
+				}
 			}
 		}
+	}
 
-		if !valid {
-			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
+	return ""
 }
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the web dashboard server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var bindHost string
+		if bindAll {
+			if len(authTokens) == 0 && !requireAuth {
+				return fmt.Errorf("--auth-token is required when using --bind-all")
+			}
+			bindHost = "0.0.0.0"
+		} else if useTailscale {
+			bindHost = tailscaleIP
+			if bindHost == "" {
+				detected := detectTailscaleIP()
+				if detected == "" {
+					fmt.Println("Warning: Tailscale interface not detected. Use --tailscale-ip to specify manually.")
+					bindHost = "127.0.0.1"
+				} else {
+					fmt.Printf("Detected Tailscale IP: %s\n", detected)
+					bindHost = detected
+				}
+			}
+		} else {
+			bindHost = "127.0.0.1"
+		}
+
 		database, err := db.New(dbPath)
 		if err != nil {
 			return fmt.Errorf("opening database: %w", err)
@@ -128,14 +143,17 @@ var serveCmd = &cobra.Command{
 		mux.HandleFunc("/partials/weekly-stats", makePartialHandler(database, partials, "weekly-stats.html", getWeeklyData))
 		mux.HandleFunc("/partials/overall-stats", makePartialHandler(database, partials, "overall-stats.html", getOverallData))
 
-		addr := fmt.Sprintf(":%d", servePort)
-		fmt.Printf("Starting server at http://localhost%s\n", addr)
+		addr := fmt.Sprintf("%s:%d", bindHost, servePort)
+		fmt.Printf("Starting server at http://%s\n", addr)
 		return http.ListenAndServe(addr, mux)
 	},
 }
 
 func init() {
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", 8080, "Port to listen on")
+	serveCmd.Flags().BoolVar(&bindAll, "bind-all", false, "Bind to all interfaces (0.0.0.0) - requires auth token")
+	serveCmd.Flags().BoolVar(&useTailscale, "tailscale", false, "Bind to Tailscale interface")
+	serveCmd.Flags().StringVar(&tailscaleIP, "tailscale-ip", "", "Tailscale IP address (auto-detected if not specified)")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -173,44 +191,24 @@ func getStatusData(database *db.DB) (any, error) {
 	}, nil
 }
 
-type ChartPoint struct {
-	X float64
-	Y float64
-}
-
-type ChartLabel struct {
-	X          float64
-	Y          float64
-	Text       string
-	FontSize   int
-	TextAnchor string
-}
-
 type ChartData struct {
-	Width       float64
-	Height      float64
-	Padding     float64
-	ChartWidth  float64
-	ChartHeight float64
-	PointsUsed  []ChartPoint
-	PointsLeft  []ChartPoint
-	Labels      []ChartLabel
-	NoData      bool
+	SVGContent template.HTML
 }
 
 func getChartData(database *db.DB) (any, error) {
 	since := time.Now().AddDate(0, 0, -7)
 	snapshots, err := database.GetSnapshots(since)
 	if err != nil || len(snapshots) == 0 {
-		return ChartData{NoData: true, Width: 800, Height: 400}, nil
+		return ChartData{SVGContent: template.HTML("<text x='400' y='200' text-anchor='middle' fill='#71767b'>No data available</text>")}, nil
 	}
 
-	return generateSVGChart(snapshots), nil
+	svg := generateSVGChart(snapshots)
+	return ChartData{SVGContent: template.HTML(svg)}, nil
 }
 
-func generateSVGChart(snapshots []db.UsageSnapshot) ChartData {
+func generateSVGChart(snapshots []db.UsageSnapshot) string {
 	if len(snapshots) < 2 {
-		return ChartData{NoData: true, Width: 800, Height: 400}
+		return "<text x='400' y='200' text-anchor='middle' fill='#71767b'>Need more data points</text>"
 	}
 
 	width := 800.0
@@ -226,52 +224,46 @@ func generateSVGChart(snapshots []db.UsageSnapshot) ChartData {
 		}
 	}
 
-	pointsUsed := make([]ChartPoint, len(snapshots))
-	pointsLeft := make([]ChartPoint, len(snapshots))
+	pointsUsed := make([]string, len(snapshots))
+	pointsLeft := make([]string, len(snapshots))
 
 	for i, s := range snapshots {
 		x := padding + (float64(i)/float64(len(snapshots)-1))*chartWidth
 		yUsed := padding + chartHeight - (float64(s.RequestsUsed)/maxVal)*chartHeight
 		yLeft := padding + chartHeight - (float64(s.Leftover)/maxVal)*chartHeight
 
-		pointsUsed[i] = ChartPoint{X: x, Y: yUsed}
-		pointsLeft[i] = ChartPoint{X: x, Y: yLeft}
+		pointsUsed[i] = fmt.Sprintf("%.1f,%.1f", x, yUsed)
+		pointsLeft[i] = fmt.Sprintf("%.1f,%.1f", x, yLeft)
 	}
+
+	var svg strings.Builder
+	svg.WriteString(fmt.Sprintf(`<svg viewBox="0 0 %.0f %.0f" xmlns="http://www.w3.org/2000/svg">`, width, height))
+
+	svg.WriteString(`<rect width="100%" height="100%" fill="#0f1419"/>`)
+
+	svg.WriteString(fmt.Sprintf(`<line x1="%.0f" y1="%.0f" x2="%.0f" y2="%.0f" stroke="#2f3336" stroke-width="1"/>`, padding, padding, padding, height-padding))
+	svg.WriteString(fmt.Sprintf(`<line x1="%.0f" y1="%.0f" x2="%.0f" y2="%.0f" stroke="#2f3336" stroke-width="1"/>`, padding, height-padding, width-padding, height-padding))
+
+	svg.WriteString(fmt.Sprintf(`<text x="%.0f" y="%.0f" fill="#71767b" font-size="12">Used</text>`, padding, padding-20))
+	svg.WriteString(fmt.Sprintf(`<text x="%.0f" y="%.0f" fill="#71767b" font-size="12">Leftover</text>`, padding+80, padding-20))
+
+	svg.WriteString(fmt.Sprintf(`<polyline points="%s" fill="none" stroke="#f4212e" stroke-width="2"/>`, strings.Join(pointsUsed, " ")))
+	svg.WriteString(fmt.Sprintf(`<polyline points="%s" fill="none" stroke="#00ba7c" stroke-width="2"/>`, strings.Join(pointsLeft, " ")))
 
 	step := len(snapshots) / 5
 	if step < 1 {
 		step = 1
 	}
-
-	labels := []ChartLabel{
-		{X: padding, Y: padding - 20, Text: "Used", FontSize: 12, TextAnchor: "start"},
-		{X: padding + 80, Y: padding - 20, Text: "Leftover", FontSize: 12, TextAnchor: "start"},
-	}
-
 	for i, s := range snapshots {
 		if i%step == 0 || i == len(snapshots)-1 {
 			x := padding + (float64(i)/float64(len(snapshots)-1))*chartWidth
-			labels = append(labels, ChartLabel{
-				X:          x,
-				Y:          height - padding + 20,
-				Text:       s.CollectedAt.Format("01/02"),
-				FontSize:   10,
-				TextAnchor: "middle",
-			})
+			label := s.CollectedAt.Format("01/02")
+			svg.WriteString(fmt.Sprintf(`<text x="%.0f" y="%.0f" fill="#71767b" font-size="10" text-anchor="middle">%s</text>`, x, height-padding+20, label))
 		}
 	}
 
-	return ChartData{
-		Width:       width,
-		Height:      height,
-		Padding:     padding,
-		ChartWidth:  chartWidth,
-		ChartHeight: chartHeight,
-		PointsUsed:  pointsUsed,
-		PointsLeft:  pointsLeft,
-		Labels:      labels,
-		NoData:      false,
-	}
+	svg.WriteString(`</svg>`)
+	return svg.String()
 }
 
 type BurnRateData struct {

@@ -1,3 +1,40 @@
 <div class="chart-container">
-    {{.SVGContent}}
+    {{if .NoData}}
+        <svg viewBox="0 0 {{.Width}} {{.Height}}" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="#0f1419"/>
+            <text x="{{.Width}}" y="{{.Height}}" text-anchor="middle" fill="#71767b">No data available</text>
+        </svg>
+    {{else}}
+        <svg viewBox="0 0 {{.Width}} {{.Height}}" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="#0f1419"/>
+            
+            <!-- Grid lines -->
+            <line x1="{{.Padding}}" y1="{{.Padding}}" x2="{{.Padding}}" y2="{{.Height}} - {{.Padding}}" stroke="#2f3336" stroke-width="1"/>
+            <line x1="{{.Padding}}" y1="{{.Height}} - {{.Padding}}" x2="{{.Width}} - {{.Padding}}" y2="{{.Height}} - {{.Padding}}" stroke="#2f3336" stroke-width="1"/>
+            
+            <!-- Legend -->
+            {{range .Labels}}
+                {{if eq .Text "Used"}}
+                    <text x="{{.X}}" y="{{.Y}}" fill="#71767b" font-size="{{.FontSize}}">{{.Text}}</text>
+                {{else if eq .Text "Leftover"}}
+                    <text x="{{.X}}" y="{{.Y}}" fill="#71767b" font-size="{{.FontSize}}">{{.Text}}</text>
+                {{end}}
+            {{end}}
+            
+            <!-- Used line (red) -->
+            <polyline points="{{range .PointsUsed}}{{.X}},{{.Y}} {{end}}" fill="none" stroke="#f4212e" stroke-width="2"/>
+            
+            <!-- Leftover line (green) -->
+            <polyline points="{{range .PointsLeft}}{{.X}},{{.Y}} {{end}}" fill="none" stroke="#00ba7c" stroke-width="2"/>
+            
+            <!-- X-axis labels -->
+            {{range .Labels}}
+                {{if ne .Text "Used"}}
+                    {{if ne .Text "Leftover"}}
+                        <text x="{{.X}}" y="{{.Y}}" fill="#71767b" font-size="{{.FontSize}}" text-anchor="{{.TextAnchor}}">{{.Text}}</text>
+                    {{end}}
+                {{end}}
+            {{end}}
+        </svg>
+    {{end}}
 </div>
