@@ -10,10 +10,11 @@ import (
 
 type DB struct {
 	*sql.DB
+	path string
 }
 
 func New(dbPath string) (*DB, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		return nil, err
 	}
 
@@ -22,16 +23,32 @@ func New(dbPath string) (*DB, error) {
 		return nil, err
 	}
 
-	wrapped := &DB{db}
-	if err := wrapped.Migrate(); err != nil {
+	wrapper := &DB{DB: db, path: dbPath}
+	if err := wrapper.Migrate(); err != nil {
 		return nil, err
 	}
 
-	return wrapped, nil
+	if err := os.Chmod(dbPath, 0600); err != nil {
+		return nil, err
+	}
+
+	return wrapper, nil
 }
 
 func (db *DB) Migrate() error {
-	_, err := db.Exec(`
+	if _, err := os.Stat(db.path); err == nil {
+		if err := os.Chmod(db.path, 0600); err != nil {
+			return err
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 CREATE TABLE IF NOT EXISTS usage_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -67,5 +84,9 @@ FROM usage_snapshots
 GROUP BY strftime('%Y-W%W', collected_at)
 ORDER BY week DESC;
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
