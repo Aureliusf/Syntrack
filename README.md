@@ -154,6 +154,22 @@ sqlite3 usage.db "SELECT * FROM daily_usage;"
 └── README.md
 ```
 
+## Security
+
+### Dependency Scanning
+
+Scan for known vulnerabilities in Go dependencies:
+
+```bash
+# Install govulncheck
+go install golang.org/x/vuln/cmd/govulncheck@latest
+
+# Run vulnerability scan
+govulncheck ./...
+```
+
+**Nix users**: This is automatically available in the dev shell via `flake.nix`.
+
 ## License
 
 MIT
