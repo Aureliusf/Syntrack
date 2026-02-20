@@ -15,9 +15,135 @@
         <a href="/">Dashboard</a>
         <a href="/history">History</a>
         <a href="/stats">Stats</a>
+        <div id="auth-status" class="auth-status">
+            <button onclick="showAuthModal()" id="auth-btn">🔒 Authenticate</button>
+        </div>
     </nav>
+    
+    <div id="auth-modal" class="auth-modal" style="display: none;">
+        <div class="auth-modal-content">
+            <h3>Authentication Required</h3>
+            <p>Enter your access token to view the dashboard.</p>
+            <input type="password" id="token-input" placeholder="Enter token..." autocomplete="off">
+            <div class="auth-actions">
+                <button onclick="saveToken()">Authenticate</button>
+                <button onclick="hideAuthModal()" class="secondary">Cancel</button>
+            </div>
+            <p class="auth-hint">Token is saved locally in your browser.</p>
+        </div>
+    </div>
+    
     <main>
     {{template "content" .}}
     </main>
+    
+    <script>
+        // Get token from URL parameter
+        function getTokenFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('token');
+        }
+        
+        // Load token from localStorage or URL
+        function loadToken() {
+            // Check URL first
+            const urlToken = getTokenFromURL();
+            if (urlToken) {
+                localStorage.setItem('syntrack_token', urlToken);
+                // Clean URL without reloading
+                const newURL = window.location.pathname + window.location.hash;
+                window.history.replaceState({}, document.title, newURL);
+                return urlToken;
+            }
+            // Fall back to localStorage
+            return localStorage.getItem('syntrack_token');
+        }
+        
+        // Save token to localStorage
+        function saveToken() {
+            const token = document.getElementById('token-input').value.trim();
+            if (token) {
+                localStorage.setItem('syntrack_token', token);
+                updateAuthUI();
+                hideAuthModal();
+                // Reload partials with new token
+                reloadPartials();
+            }
+        }
+        
+        // Clear token
+        function clearToken() {
+            localStorage.removeItem('syntrack_token');
+            updateAuthUI();
+            reloadPartials();
+        }
+        
+        // Show/hide modal
+        function showAuthModal() {
+            document.getElementById('auth-modal').style.display = 'flex';
+            document.getElementById('token-input').focus();
+        }
+        
+        function hideAuthModal() {
+            document.getElementById('auth-modal').style.display = 'none';
+        }
+        
+        // Update UI based on auth state
+        function updateAuthUI() {
+            const token = localStorage.getItem('syntrack_token');
+            const btn = document.getElementById('auth-btn');
+            if (token) {
+                btn.textContent = '🔓 Authenticated';
+                btn.onclick = clearToken;
+                btn.title = 'Click to logout';
+            } else {
+                btn.textContent = '🔒 Authenticate';
+                btn.onclick = showAuthModal;
+                btn.title = 'Click to authenticate';
+            }
+        }
+        
+        // Reload all HTMX partials
+        function reloadPartials() {
+            document.querySelectorAll('[hx-get]').forEach(el => {
+                htmx.trigger(el, 'load');
+            });
+        }
+        
+        // Configure HTMX to send token header
+        document.body.addEventListener('htmx:configRequest', function(evt) {
+            const token = localStorage.getItem('syntrack_token');
+            if (token) {
+                evt.detail.headers['X-Auth-Token'] = token;
+            }
+        });
+        
+        // Handle auth errors
+        document.body.addEventListener('htmx:responseError', function(evt) {
+            if (evt.detail.xhr.status === 401) {
+                showAuthModal();
+            }
+        });
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadToken();
+            updateAuthUI();
+        });
+        
+        // Close modal on escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                hideAuthModal();
+            }
+        });
+        
+        // Close modal on outside click
+        document.getElementById('auth-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                hideAuthModal();
+            }
+        });
+    </script>
 </body>
 </html>
