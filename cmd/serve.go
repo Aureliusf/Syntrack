@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ var authTokens []string
 var bindAll bool
 var useTailscale bool
 var tailscaleIP string
+var serveSilent bool
 
 func detectTailscaleIP() string {
 	interfaces, err := net.Interfaces()
@@ -93,6 +96,11 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the web dashboard server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Handle silent mode: start server in background
+		if serveSilent {
+			return startServerInBackground()
+		}
+
 		// Load config to get auth tokens
 		cfg, err := config.Load()
 		if err != nil {
@@ -208,12 +216,96 @@ var serveCmd = &cobra.Command{
 	},
 }
 
+func startServerInBackground() error {
+	fmt.Println("Starting syntrack server in the background...")
+
+	// Get the current executable path
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+
+	// Build arguments for the background process (without --silent flag)
+	args := []string{"serve"}
+	if servePort != 8080 {
+		args = append(args, "-p", fmt.Sprintf("%d", servePort))
+	}
+	if requireAuth {
+		args = append(args, "--auth")
+	}
+	if bindAll {
+		args = append(args, "--bind-all")
+	}
+	if useTailscale {
+		args = append(args, "--tailscale")
+	}
+	if tailscaleIP != "" {
+		args = append(args, "--tailscale-ip", tailscaleIP)
+	}
+
+	// Start the server process detached from parent
+	cmd := exec.Command(exePath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = nil
+
+	// Detach from parent process
+	if cmd.SysProcAttr != nil {
+		cmd.SysProcAttr.Setpgid = true
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting server process: %w", err)
+	}
+
+	// Get the bind host for the health check
+	var bindHost string
+	if bindAll {
+		bindHost = "0.0.0.0"
+	} else if useTailscale {
+		bindHost = tailscaleIP
+		if bindHost == "" {
+			bindHost = detectTailscaleIP()
+			if bindHost == "" {
+				bindHost = "127.0.0.1"
+			}
+		}
+	} else {
+		bindHost = "127.0.0.1"
+	}
+
+	addr := fmt.Sprintf("%s:%d", bindHost, servePort)
+	url := fmt.Sprintf("http://%s", addr)
+
+	fmt.Printf("Server starting on %s\n", url)
+	fmt.Println("Waiting for server to be ready...")
+
+	// Wait and check if server is ready
+	client := &http.Client{Timeout: 2 * time.Second}
+	maxAttempts := 15
+	for i := 0; i < maxAttempts; i++ {
+		time.Sleep(500 * time.Millisecond)
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			fmt.Printf("✓ Server is online and reachable at %s\n", url)
+			fmt.Println("The server is now running in the background.")
+			fmt.Printf("Process ID: %d\n", cmd.Process.Pid)
+			return nil
+		}
+	}
+
+	// If we get here, server didn't start in time
+	return fmt.Errorf("server failed to start within %d seconds", maxAttempts/2)
+}
+
 func init() {
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", 8080, "Port to listen on")
 	serveCmd.Flags().BoolVar(&requireAuth, "auth", false, "Require token authentication (reads from SYNTRACK_AUTH_TOKENS env or ~/.syntrack/tokens)")
 	serveCmd.Flags().BoolVar(&bindAll, "bind-all", false, "Bind to all interfaces (0.0.0.0) - requires auth token")
 	serveCmd.Flags().BoolVar(&useTailscale, "tailscale", false, "Bind to Tailscale interface")
 	serveCmd.Flags().StringVar(&tailscaleIP, "tailscale-ip", "", "Tailscale IP address (auto-detected if not specified)")
+	serveCmd.Flags().BoolVar(&serveSilent, "silent", false, "Start server in background and exit")
 	rootCmd.AddCommand(serveCmd)
 }
 

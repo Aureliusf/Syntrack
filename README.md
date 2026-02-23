@@ -88,6 +88,26 @@ Or manually add to crontab:
 ./syntrack chart -d 30          # Last 30 days
 ```
 
+### Background Server (Silent Mode)
+
+Start the web dashboard in the background and exit the CLI:
+
+```bash
+./syntrack serve --silent       # Start server in background
+./syntrack serve --silent -p 3000  # Custom port
+```
+
+This will:
+1. Start the server as a detached background process
+2. Wait for the server to respond (up to ~7 seconds)
+3. Display the server URL and process ID
+4. Exit the CLI while keeping the server running
+
+To stop the background server:
+```bash
+kill <PID>  # Use the process ID shown when starting
+```
+
 ### JSON Queries (for agents/scripts)
 
 ```bash
