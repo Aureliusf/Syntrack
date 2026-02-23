@@ -1,8 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 # Install syntrack cron job with proper .env sourcing
+# Works with both bash and POSIX sh
 
-SYNTRACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SYNTRACK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SYNTRACK_BIN="$SYNTRACK_DIR/syntrack"
 ENV_FILE="$SYNTRACK_DIR/.env"
 
@@ -22,7 +25,7 @@ BASH_PATH="/bin/bash"
 if [ ! -x "$BASH_PATH" ]; then
     BASH_PATH="/usr/bin/bash"
     if [ ! -x "$BASH_PATH" ]; then
-        BASH_PATH=$(command -v bash)
+        BASH_PATH="$(command -v bash 2>/dev/null)"
     fi
 fi
 
@@ -30,12 +33,6 @@ if [ -z "$BASH_PATH" ] || [ ! -x "$BASH_PATH" ]; then
     echo "Warning: bash not found. Falling back to /bin/sh (may have issues with .env)"
     BASH_PATH="/bin/sh"
 fi
-
-# Build the cron job
-# Use 'set -a' to export all variables from .env automatically
-CRON_JOB="SHELL=$BASH_PATH"
-CRON_JOB="${CRON_JOB}
-*/30 * * * * cd $SYNTRACK_DIR && set -a && source $ENV_FILE 2>/dev/null && set +a && $SYNTRACK_BIN collect >> $LOG_FILE 2>&1"
 
 echo "Installing syntrack cron job..."
 echo "Binary: $SYNTRACK_BIN"
@@ -56,29 +53,32 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "The cron job may fail if SYNTHETIC_API_KEY is not set."
 fi
 
-# Remove old cron job
-if crontab -l 2>/dev/null | grep -q "syntrack collect"; then
-    echo "Removing old cron job..."
-    crontab -l 2>/dev/null | grep -v "syntrack" | crontab -
+# Build the cron job command
+# The job changes to the project directory and sources the .env file
+CRON_CMD="cd $SYNTRACK_DIR && set -a && . $ENV_FILE 2>/dev/null && set +a && $SYNTRACK_BIN collect >> $LOG_FILE 2>&1"
+
+# Remove old syntrack entries from crontab
+OLD_CRON=$(crontab -l 2>/dev/null | grep -v "syntrack" || true)
+
+# Build new crontab with SHELL directive
+NEW_CRON=""
+if [ -n "$OLD_CRON" ]; then
+    NEW_CRON="$OLD_CRON"
 fi
 
-# Add new cron job with SHELL directive
-EXISTING_CRON=$(crontab -l 2>/dev/null | grep -v "syntrack")
-if [ -n "$EXISTING_CRON" ]; then
-    # Preserve existing crontab, just add our job
-    echo "$EXISTING_CRON" > /tmp/crontab.tmp
-    echo "" >> /tmp/crontab.tmp
-    echo "# Syntrack - runs every 30 minutes" >> /tmp/crontab.tmp
-    echo "$CRON_JOB" >> /tmp/crontab.tmp
-    crontab /tmp/crontab.tmp
-    rm /tmp/crontab.tmp
-else
-    # New crontab
-    echo "# Syntrack - runs every 30 minutes" > /tmp/crontab.tmp
-    echo "$CRON_JOB" >> /tmp/crontab.tmp
-    crontab /tmp/crontab.tmp
-    rm /tmp/crontab.tmp
+# Add syntrack section
+if [ -n "$NEW_CRON" ]; then
+    NEW_CRON="$NEW_CRON
+
+"
 fi
+
+NEW_CRON="${NEW_CRON}# Syntrack - runs every 30 minutes
+SHELL=$BASH_PATH
+*/30 * * * * $CRON_CMD"
+
+# Install new crontab
+echo "$NEW_CRON" | crontab -
 
 echo ""
 echo "Done! Cron job installed:"
