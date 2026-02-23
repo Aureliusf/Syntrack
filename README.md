@@ -54,14 +54,19 @@ Install 30-minute collection:
 # Make script executable (first time only)
 chmod +x ./scripts/install-cron.sh
 
-# Run installer
+# Run installer (automatically sources .env file)
 ./scripts/install-cron.sh
 ```
 
-Or manually add to crontab:
+The installer will:
+- Create a secure log directory at `~/.syntrack/logs/`
+- Source environment variables from the `.env` file
+- Install a cron job that runs every 30 minutes
+
+Or manually add to crontab (make sure to source .env):
 
 ```bash
-*/30 * * * * /path/to/syntrack collect >> /tmp/syntrack.log 2>&1
+*/30 * * * * cd /path/to/syntrack && export $(grep -v '^#' .env | xargs) && ./syntrack collect >> ~/.syntrack/logs/syntrack.log 2>&1
 ```
 
 ### View History
