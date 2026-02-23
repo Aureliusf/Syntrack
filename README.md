@@ -16,7 +16,7 @@ Collects quota data every 30 minutes, stores in SQLite, and provides CLI queries
 ## Installation
 
 ```bash
-git clone <repo>
+git clone git@github.com:Aureliusf/Syntrack.git
 cd syntrack
 
 # Enter dev shell (Go + SQLite)
@@ -51,6 +51,10 @@ Fetch quota from Synthetic API and store snapshot:
 Install 30-minute collection:
 
 ```bash
+# Make script executable (first time only)
+chmod +x ./scripts/install-cron.sh
+
+# Run installer
 ./scripts/install-cron.sh
 ```
 
