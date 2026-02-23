@@ -1,6 +1,6 @@
 # Syntrack
 
-CLI tool to track [Synthetic.ai](https://synthetic.ai) usage and leftover requests.
+CLI tool to track [Synthetic.new](https://synthetic.new) usage and leftover requests.
 
 Collects quota data every 30 minutes, stores in SQLite, and provides CLI queries and charts as well as a web dashboard for analysis.
 
