@@ -53,9 +53,9 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "The cron job may fail if SYNTHETIC_API_KEY is not set."
 fi
 
-# Build the cron job command
-# The job changes to the project directory and sources the .env file
-CRON_CMD="cd $SYNTRACK_DIR && set -a && . $ENV_FILE 2>/dev/null && set +a && $SYNTRACK_BIN collect >> $LOG_FILE 2>&1"
+# Build the cron job command with timestamps
+# The job changes to the project directory, sources the .env file, and logs with timestamps
+CRON_CMD="cd $SYNTRACK_DIR && set -a && . $ENV_FILE 2>/dev/null && set +a && echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] Starting syntrack collection\" >> $LOG_FILE && $SYNTRACK_BIN collect >> $LOG_FILE 2>&1 && echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] Collection complete\" >> $LOG_FILE"
 
 # Remove old syntrack entries from crontab
 OLD_CRON=$(crontab -l 2>/dev/null | grep -v "syntrack" || true)

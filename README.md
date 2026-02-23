@@ -62,6 +62,7 @@ The installer will:
 - Create a secure log directory at `~/.syntrack/logs/`
 - Source environment variables from the `.env` file
 - Install a cron job that runs every 30 minutes
+- Add timestamps to the log file for each run
 
 Or manually add to crontab (make sure to source .env):
 
