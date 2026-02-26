@@ -67,11 +67,14 @@ func tokenAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check X-Auth-Token header
+		// Check X-Auth-Token header or token query parameter
 		token := r.Header.Get("X-Auth-Token")
 		if token == "" {
-			http.Error(w, "Unauthorized: X-Auth-Token header required", http.StatusUnauthorized)
-			return
+			token = r.URL.Query().Get("token")
+			if token == "" {
+				http.Error(w, "Unauthorized: X-Auth-Token header or token query parameter required", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		// Validate token
@@ -210,7 +213,7 @@ var serveCmd = &cobra.Command{
 		fmt.Printf("Starting server at http://%s\n", addr)
 		if requireAuth {
 			fmt.Printf("Authentication enabled with %d token(s)\n", len(authTokens))
-			fmt.Println("External requests require X-Auth-Token header")
+			fmt.Println("External requests require X-Auth-Token header or token query parameter")
 		}
 		return http.ListenAndServe(addr, handler)
 	},
